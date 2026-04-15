@@ -1,8 +1,5 @@
 import sqlite3
 import hashlib
-import os
-from datetime import datetime
-
 
 DB_NAME = "financeiro.db"
 
@@ -75,7 +72,7 @@ def authenticate_user(username: str, password: str):
     user = cursor.fetchone()
     conn.close()
 
-    return user  # (id, username) ou None
+    return user
 
 
 def user_exists(username: str):

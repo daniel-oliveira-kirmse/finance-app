@@ -3,9 +3,10 @@ from PySide6.QtWidgets import (
     QLabel, QComboBox, QPushButton, QTableWidget, QTableWidgetItem,
     QMessageBox, QDateEdit, QGroupBox, QFileDialog
 )
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QSettings
 
 from ui.add_transaction import AddTransactionForm
+from ui.toggle_switch import ToggleSwitch
 import database
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -17,10 +18,13 @@ import pandas as pd
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, user_id, username):
+    def __init__(self, user_id, username, app):
         super().__init__()
+
         self.user_id = user_id
         self.username = username
+        self.app = app
+        self.settings = QSettings("FinanceiroApp", "SistemaFinanceiro")
 
         self.setWindowTitle(f"Sistema Financeiro - {self.username}")
         self.setMinimumSize(1200, 750)
@@ -37,6 +41,8 @@ class MainWindow(QMainWindow):
         self.build_charts_section()
 
         self.refresh_all()
+
+    # ---------------- UI BUILD ----------------
 
     def build_top_section(self):
         top_layout = QHBoxLayout()
@@ -62,12 +68,34 @@ class MainWindow(QMainWindow):
         resumo_layout.addWidget(self.lbl_despesas)
         resumo_layout.addWidget(self.lbl_saldo)
 
+        # Mock Data
         self.btn_mock = QPushButton("Inserir Dados de Exemplo")
         self.btn_mock.setObjectName("btnMock")
         self.btn_mock.clicked.connect(self.insert_mock_data)
-
         resumo_layout.addWidget(self.btn_mock)
 
+        # Toggle Tema (Switch Animado)
+        theme_layout = QHBoxLayout()
+
+        self.lbl_theme = QLabel("Tema:")
+        self.lbl_theme.setObjectName("labelTheme")
+
+        self.toggle_theme_switch = ToggleSwitch()
+        self.toggle_theme_switch.set_icons("assets/sun.svg", "assets/moon.svg")
+        self.toggle_theme_switch.clicked.connect(self.toggle_theme)
+
+        saved_theme = self.settings.value("theme", "light")
+        self.toggle_theme_switch.setChecked(saved_theme == "dark")
+
+        self.toggle_theme_switch.start_animation()
+
+        theme_layout.addWidget(self.lbl_theme)
+        theme_layout.addStretch()
+        theme_layout.addWidget(self.toggle_theme_switch)
+
+        resumo_layout.addLayout(theme_layout)
+
+        # Exportações
         export_layout = QHBoxLayout()
 
         self.btn_export_excel = QPushButton("Exportar Excel")
@@ -140,7 +168,6 @@ class MainWindow(QMainWindow):
         left = QVBoxLayout()
         right = QVBoxLayout()
 
-        # Chart 1: Linha Receita vs Despesa
         self.combo_periodo = QComboBox()
         self.combo_periodo.addItems(["Diário", "Semanal", "Mensal"])
         self.combo_periodo.currentIndexChanged.connect(self.refresh_charts)
@@ -152,7 +179,6 @@ class MainWindow(QMainWindow):
         self.canvas_line = FigureCanvas(self.figure_line)
         left.addWidget(self.canvas_line)
 
-        # Chart 2: Pizza de Despesas por Categoria
         right.addWidget(QLabel("Distribuição de Despesas por Categoria:"))
 
         self.figure_pie = Figure(figsize=(5, 4))
@@ -165,6 +191,26 @@ class MainWindow(QMainWindow):
         charts_box.setLayout(layout)
         self.main_layout.addWidget(charts_box)
 
+    # ---------------- THEME ----------------
+
+    def toggle_theme(self):
+        if self.toggle_theme_switch.isChecked():
+            new_theme = "dark"
+        else:
+            new_theme = "light"
+
+        self.settings.setValue("theme", new_theme)
+
+        qss_file = "styles/style_dark.qss" if new_theme == "dark" else "styles/style_light.qss"
+
+        try:
+            with open(qss_file, "r", encoding="utf-8") as f:
+                self.app.setStyleSheet(f.read())
+        except Exception as e:
+            QMessageBox.warning(self, "Erro", f"Erro ao aplicar tema: {e}")
+
+    # ---------------- FILTERS ----------------
+
     def clear_filters(self):
         self.combo_categoria.setCurrentIndex(0)
         self.date_inicio.setDate(QDate.currentDate().addMonths(-1))
@@ -176,6 +222,8 @@ class MainWindow(QMainWindow):
         data_inicio = self.date_inicio.date().toString("yyyy-MM-dd")
         data_fim = self.date_fim.date().toString("yyyy-MM-dd")
         return categoria, data_inicio, data_fim
+
+    # ---------------- CRUD ----------------
 
     def insert_mock_data(self):
         confirm = QMessageBox.question(
@@ -195,6 +243,22 @@ class MainWindow(QMainWindow):
             database.update_transaction(transaction_id, self.user_id, tipo, valor, categoria, data)
 
         self.refresh_all()
+
+    def edit_transaction(self, transaction_id, tipo, valor, categoria, data):
+        self.form.fill_for_edit(transaction_id, tipo, valor, categoria, data)
+
+    def delete_transaction(self, transaction_id):
+        confirm = QMessageBox.question(
+            self,
+            "Confirmação",
+            "Deseja realmente excluir esta movimentação?"
+        )
+
+        if confirm == QMessageBox.Yes:
+            database.delete_transaction(self.user_id, transaction_id)
+            self.refresh_all()
+
+    # ---------------- LOAD / REFRESH ----------------
 
     def load_categories(self):
         current = self.combo_categoria.currentText()
@@ -254,7 +318,10 @@ class MainWindow(QMainWindow):
 
             btn_edit = QPushButton("Editar")
             btn_edit.setObjectName("btnEdit")
-            btn_edit.clicked.connect(lambda _, tid=id_, t=tipo, v=valor, c=categoria, d=data: self.edit_transaction(tid, t, v, c, d))
+            btn_edit.clicked.connect(
+                lambda _, tid=id_, t=tipo, v=valor, c=categoria, d=data:
+                self.edit_transaction(tid, t, v, c, d)
+            )
 
             btn_delete = QPushButton("Excluir")
             btn_delete.setObjectName("btnDelete")
@@ -264,20 +331,6 @@ class MainWindow(QMainWindow):
             self.table.setCellWidget(row_index, 6, btn_delete)
 
         self.table.resizeColumnsToContents()
-
-    def edit_transaction(self, transaction_id, tipo, valor, categoria, data):
-        self.form.fill_for_edit(transaction_id, tipo, valor, categoria, data)
-
-    def delete_transaction(self, transaction_id):
-        confirm = QMessageBox.question(
-            self,
-            "Confirmação",
-            "Deseja realmente excluir esta movimentação?"
-        )
-
-        if confirm == QMessageBox.Yes:
-            database.delete_transaction(self.user_id, transaction_id)
-            self.refresh_all()
 
     def refresh_summary(self):
         _, data_inicio, data_fim = self.get_filters()
@@ -304,6 +357,8 @@ class MainWindow(QMainWindow):
             self.lbl_saldo.setStyleSheet("color: #2ecc71; font-weight: bold; font-size: 18px;")
         else:
             self.lbl_saldo.setStyleSheet("color: #e74c3c; font-weight: bold; font-size: 18px;")
+
+    # ---------------- CHARTS ----------------
 
     def refresh_charts(self):
         self.refresh_line_chart()
@@ -350,7 +405,7 @@ class MainWindow(QMainWindow):
         ax.legend()
         ax.grid(True)
 
-        ax.tick_params(axis='x', rotation=30)
+        ax.tick_params(axis="x", rotation=30)
 
         self.figure_line.tight_layout()
         self.canvas_line.draw()
@@ -403,7 +458,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Erro", "Não há dados para exportar.")
             return
 
-        filename, _ = QFileDialog.getSaveFileName(self, "Salvar Excel", "movimentacoes.xlsx", "Excel (*.xlsx)")
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Salvar Excel", "movimentacoes.xlsx", "Excel (*.xlsx)"
+        )
 
         if not filename:
             return
@@ -443,7 +500,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Erro", "Não há dados para exportar.")
             return
 
-        filename, _ = QFileDialog.getSaveFileName(self, "Salvar PDF", "movimentacoes.pdf", "PDF (*.pdf)")
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Salvar PDF", "movimentacoes.pdf", "PDF (*.pdf)"
+        )
 
         if not filename:
             return
