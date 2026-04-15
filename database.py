@@ -1,5 +1,7 @@
 import sqlite3
 import hashlib
+from collections import defaultdict
+
 
 DB_NAME = "financeiro.db"
 
@@ -230,3 +232,66 @@ def insert_mock_data(user_id):
 
     conn.commit()
     conn.close()
+
+
+# ---------------- REPORTS / CHART DATA ----------------
+
+def fetch_expenses_by_category(user_id, data_inicio=None, data_fim=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    query = """
+        SELECT categoria, SUM(valor)
+        FROM transactions
+        WHERE user_id = ?
+        AND tipo = 'Despesa'
+    """
+    params = [user_id]
+
+    if data_inicio:
+        query += " AND data >= ?"
+        params.append(data_inicio)
+
+    if data_fim:
+        query += " AND data <= ?"
+        params.append(data_fim)
+
+    query += " GROUP BY categoria ORDER BY SUM(valor) DESC"
+
+    cursor.execute(query, params)
+    results = cursor.fetchall()
+
+    conn.close()
+    return results
+
+
+def fetch_monthly_report(user_id, year_month: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    start_date = f"{year_month}-01"
+    end_date = f"{year_month}-31"
+
+    cursor.execute("""
+        SELECT tipo, SUM(valor)
+        FROM transactions
+        WHERE user_id = ?
+        AND data >= ?
+        AND data <= ?
+        GROUP BY tipo
+    """, (user_id, start_date, end_date))
+
+    data = cursor.fetchall()
+    conn.close()
+
+    receitas = 0
+    despesas = 0
+
+    for tipo, total in data:
+        if tipo == "Receita":
+            receitas = total
+        elif tipo == "Despesa":
+            despesas = total
+
+    saldo = receitas - despesas
+    return receitas, despesas, saldo

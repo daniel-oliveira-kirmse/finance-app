@@ -40,7 +40,6 @@ def load_theme(app: QApplication):
         theme = "dark" if is_windows_dark_mode() else "light"
 
     apply_theme(app, theme)
-    return theme
 
 
 def main():
@@ -49,15 +48,31 @@ def main():
     app = QApplication(sys.argv)
     load_theme(app)
 
-    main_window = {"window": None}
+    windows = {"login": None, "main": None}
+
+    def show_login():
+        windows["login"] = LoginWindow(on_login_success)
+        windows["login"].show()
+
+    def on_logout():
+        if windows["main"]:
+            windows["main"].close()
+            windows["main"] = None
+        show_login()
 
     def on_login_success(user_id, username):
-        login.close()
-        main_window["window"] = MainWindow(user_id, username, app)
-        main_window["window"].show()
+        windows["login"].close()
+        windows["login"] = None
 
-    login = LoginWindow(on_login_success)
-    login.show()
+        windows["main"] = MainWindow(
+            user_id=user_id,
+            username=username,
+            app=app,
+            on_logout_callback=on_logout
+        )
+        windows["main"].show()
+
+    show_login()
 
     sys.exit(app.exec())
 

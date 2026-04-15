@@ -12,7 +12,7 @@ class LoginWindow(QWidget):
         self.on_login_success = on_login_success
 
         self.setWindowTitle("Login - Sistema Financeiro")
-        self.setFixedSize(420, 320)
+        self.setFixedSize(420, 340)
 
         self.build_ui()
 

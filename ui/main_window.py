@@ -7,6 +7,8 @@ from PySide6.QtCore import Qt, QDate, QSettings
 
 from ui.add_transaction import AddTransactionForm
 from ui.toggle_switch import ToggleSwitch
+from ui.settings_window import SettingsWindow
+
 import database
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -18,16 +20,18 @@ import pandas as pd
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, user_id, username, app):
+    def __init__(self, user_id, username, app, on_logout_callback=None):
         super().__init__()
 
         self.user_id = user_id
         self.username = username
         self.app = app
+        self.on_logout_callback = on_logout_callback
+
         self.settings = QSettings("FinanceiroApp", "SistemaFinanceiro")
 
         self.setWindowTitle(f"Sistema Financeiro - {self.username}")
-        self.setMinimumSize(1200, 750)
+        self.setMinimumSize(1300, 800)
 
         self.central = QWidget()
         self.setCentralWidget(self.central)
@@ -39,6 +43,7 @@ class MainWindow(QMainWindow):
         self.build_filters_section()
         self.build_table_section()
         self.build_charts_section()
+        self.build_monthly_report_section()
 
         self.refresh_all()
 
@@ -74,7 +79,7 @@ class MainWindow(QMainWindow):
         self.btn_mock.clicked.connect(self.insert_mock_data)
         resumo_layout.addWidget(self.btn_mock)
 
-        # Toggle Tema (Switch Animado)
+        # Toggle Tema
         theme_layout = QHBoxLayout()
 
         self.lbl_theme = QLabel("Tema:")
@@ -86,7 +91,6 @@ class MainWindow(QMainWindow):
 
         saved_theme = self.settings.value("theme", "light")
         self.toggle_theme_switch.setChecked(saved_theme == "dark")
-
         self.toggle_theme_switch.start_animation()
 
         theme_layout.addWidget(self.lbl_theme)
@@ -94,6 +98,21 @@ class MainWindow(QMainWindow):
         theme_layout.addWidget(self.toggle_theme_switch)
 
         resumo_layout.addLayout(theme_layout)
+
+        # Botões Config + Logout
+        actions_layout = QHBoxLayout()
+
+        self.btn_settings = QPushButton("⚙️ Configurações")
+        self.btn_logout = QPushButton("🔒 Logout")
+        self.btn_logout.setObjectName("btnLogout")
+
+        self.btn_settings.clicked.connect(self.open_settings)
+        self.btn_logout.clicked.connect(self.logout)
+
+        actions_layout.addWidget(self.btn_settings)
+        actions_layout.addWidget(self.btn_logout)
+
+        resumo_layout.addLayout(actions_layout)
 
         # Exportações
         export_layout = QHBoxLayout()
@@ -165,8 +184,8 @@ class MainWindow(QMainWindow):
         charts_box = QGroupBox("📊 Relatórios Visuais")
         layout = QHBoxLayout()
 
+        # ---------------- LEFT: Line Chart ----------------
         left = QVBoxLayout()
-        right = QVBoxLayout()
 
         self.combo_periodo = QComboBox()
         self.combo_periodo.addItems(["Diário", "Semanal", "Mensal"])
@@ -179,17 +198,76 @@ class MainWindow(QMainWindow):
         self.canvas_line = FigureCanvas(self.figure_line)
         left.addWidget(self.canvas_line)
 
-        right.addWidget(QLabel("Distribuição de Despesas por Categoria:"))
+        # ---------------- RIGHT: Pie + Bar ----------------
+        right = QVBoxLayout()
 
-        self.figure_pie = Figure(figsize=(5, 4))
+        right.addWidget(QLabel("Distribuição de Despesas (Pizza):"))
+
+        self.figure_pie = Figure(figsize=(5, 3))
         self.canvas_pie = FigureCanvas(self.figure_pie)
         right.addWidget(self.canvas_pie)
+
+        right.addWidget(QLabel("Despesas por Categoria (Barras):"))
+
+        self.figure_bar = Figure(figsize=(5, 3))
+        self.canvas_bar = FigureCanvas(self.figure_bar)
+        right.addWidget(self.canvas_bar)
 
         layout.addLayout(left)
         layout.addLayout(right)
 
         charts_box.setLayout(layout)
         self.main_layout.addWidget(charts_box)
+
+    def build_monthly_report_section(self):
+        report_box = QGroupBox("📅 Relatório Mensal Automático")
+        layout = QHBoxLayout()
+
+        self.combo_month = QComboBox()
+
+        now = datetime.now()
+        year = now.year
+
+        for m in range(1, 13):
+            month_str = f"{year}-{m:02d}"
+            self.combo_month.addItem(month_str)
+
+        self.combo_month.setCurrentText(now.strftime("%Y-%m"))
+        self.combo_month.currentIndexChanged.connect(self.refresh_monthly_report)
+
+        self.lbl_monthly = QLabel("Relatório: R$ 0,00")
+        self.lbl_monthly.setObjectName("labelMonthly")
+
+        self.btn_export_month_pdf = QPushButton("Exportar Relatório Mensal PDF")
+        self.btn_export_month_pdf.clicked.connect(self.export_monthly_pdf)
+
+        layout.addWidget(QLabel("Mês:"))
+        layout.addWidget(self.combo_month)
+        layout.addStretch()
+        layout.addWidget(self.lbl_monthly)
+        layout.addWidget(self.btn_export_month_pdf)
+
+        report_box.setLayout(layout)
+        self.main_layout.addWidget(report_box)
+
+    # ---------------- SETTINGS / LOGOUT ----------------
+
+    def open_settings(self):
+        win = SettingsWindow(self.username)
+        win.exec()
+
+    def logout(self):
+        confirm = QMessageBox.question(
+            self,
+            "Logout",
+            "Deseja sair da conta?"
+        )
+
+        if confirm == QMessageBox.Yes:
+            self.close()
+
+            if self.on_logout_callback:
+                self.on_logout_callback()
 
     # ---------------- THEME ----------------
 
@@ -280,6 +358,7 @@ class MainWindow(QMainWindow):
         self.refresh_table()
         self.refresh_summary()
         self.refresh_charts()
+        self.refresh_monthly_report()
 
     def refresh_table(self):
         categoria, data_inicio, data_fim = self.get_filters()
@@ -358,11 +437,66 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_saldo.setStyleSheet("color: #e74c3c; font-weight: bold; font-size: 18px;")
 
+    # ---------------- MONTHLY REPORT ----------------
+
+    def refresh_monthly_report(self):
+        selected_month = self.combo_month.currentText()
+
+        receitas, despesas, saldo = database.fetch_monthly_report(self.user_id, selected_month)
+
+        text = (
+            f"Mês {selected_month} | "
+            f"Receitas: R$ {receitas:.2f} | "
+            f"Despesas: R$ {despesas:.2f} | "
+            f"Saldo: R$ {saldo:.2f}"
+        )
+
+        self.lbl_monthly.setText(text)
+
+    def export_monthly_pdf(self):
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas
+        except ImportError:
+            QMessageBox.warning(self, "Erro", "Instale reportlab: pip install reportlab")
+            return
+
+        selected_month = self.combo_month.currentText()
+        receitas, despesas, saldo = database.fetch_monthly_report(self.user_id, selected_month)
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Salvar Relatório Mensal",
+            f"relatorio_{selected_month}.pdf",
+            "PDF (*.pdf)"
+        )
+
+        if not filename:
+            return
+
+        c = canvas.Canvas(filename, pagesize=A4)
+        width, height = A4
+
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(50, height - 60, f"Relatório Mensal - {selected_month}")
+
+        c.setFont("Helvetica", 12)
+        c.drawString(50, height - 100, f"Usuário: {self.username}")
+
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(50, height - 150, f"Total Receitas: R$ {receitas:.2f}")
+        c.drawString(50, height - 180, f"Total Despesas: R$ {despesas:.2f}")
+        c.drawString(50, height - 210, f"Saldo Final: R$ {saldo:.2f}")
+
+        c.save()
+        QMessageBox.information(self, "Sucesso", "Relatório mensal exportado com sucesso!")
+
     # ---------------- CHARTS ----------------
 
     def refresh_charts(self):
         self.refresh_line_chart()
         self.refresh_pie_chart()
+        self.refresh_bar_chart()
 
     def refresh_line_chart(self):
         categoria, data_inicio, data_fim = self.get_filters()
@@ -441,6 +575,33 @@ class MainWindow(QMainWindow):
 
         self.figure_pie.tight_layout()
         self.canvas_pie.draw()
+
+    def refresh_bar_chart(self):
+        _, data_inicio, data_fim = self.get_filters()
+
+        results = database.fetch_expenses_by_category(
+            self.user_id,
+            data_inicio=data_inicio,
+            data_fim=data_fim
+        )
+
+        self.figure_bar.clear()
+        ax = self.figure_bar.add_subplot(111)
+
+        if not results:
+            ax.text(0.5, 0.5, "Sem despesas no período", ha="center", va="center")
+            ax.set_axis_off()
+        else:
+            categorias = [r[0] for r in results]
+            valores = [r[1] for r in results]
+
+            ax.bar(categorias, valores)
+            ax.set_title("Despesas por Categoria")
+            ax.set_ylabel("Valor (R$)")
+            ax.tick_params(axis="x", rotation=30)
+
+        self.figure_bar.tight_layout()
+        self.canvas_bar.draw()
 
     # ---------------- EXPORTS ----------------
 
