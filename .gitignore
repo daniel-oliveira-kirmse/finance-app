@@ -1,0 +1,14 @@
+# Ambientes Virtuais
+env/
+venv/
+
+# Cache do Python
+__pycache__/
+*.pyc
+
+# Banco de Dados Local
+financeiro.db
+
+# Arquivos do Sistema Operacional
+.DS_Store
+Thumbs.db
